@@ -1,0 +1,9 @@
+node_modules/
+.next/
+out/
+*.log
+.env*
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
