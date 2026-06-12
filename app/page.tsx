@@ -63,6 +63,7 @@ type Initial = { KRW: number; USD: number };
 
 type TopSort = "changeDesc" | "changeAsc" | "price" | "name";
 type HoldSort = "plPct" | "value" | "name";
+type ViewCur = "native" | "KRW" | "USD";
 
 type Tx = {
   id: number;
@@ -106,6 +107,45 @@ function cur(c: "KRW" | "USD") {
   return c === "KRW" ? "₩" : "$";
 }
 
+// 장 운영 시간 (한국시간 기준 표시, 미국장 서머타임 자동 반영)
+function marketHours() {
+  const now = new Date();
+  const kst = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
+  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+
+  const kMin = kst.getHours() * 60 + kst.getMinutes();
+  const kDay = kst.getDay();
+  const krOpen = kDay >= 1 && kDay <= 5 && kMin >= 540 && kMin < 930; // 09:00~15:30
+
+  const eMin = et.getHours() * 60 + et.getMinutes();
+  const eDay = et.getDay();
+  const usOpen = eDay >= 1 && eDay <= 5 && eMin >= 570 && eMin < 960; // ET 09:30~16:00
+
+  // ET → KST 변환 (서머타임이면 +13h, 아니면 +14h)
+  const diffMin = Math.round((kst.getTime() - et.getTime()) / 60_000);
+  const toHHMM = (m: number) => {
+    const mm = ((m % 1440) + 1440) % 1440;
+    return `${String(Math.floor(mm / 60)).padStart(2, "0")}:${String(mm % 60).padStart(2, "0")}`;
+  };
+  const usOpenKst = toHHMM(570 + diffMin);
+  const usCloseKst = toHHMM(960 + diffMin);
+
+  return { krOpen, usOpen, usOpenKst, usCloseKst };
+}
+
+// DB의 UTC 시각("YYYY-MM-DD HH:MM:SS")을 한국시간으로 표시
+function fmtDateKST(s: string): string {
+  const d = new Date(s.replace(" ", "T") + "Z");
+  if (isNaN(d.getTime())) return s;
+  return d.toLocaleString("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function timeAgo(iso: string | null): string {
   if (!iso) return "";
   const diff = Date.now() - new Date(iso).getTime();
@@ -135,6 +175,8 @@ export default function Home() {
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [topSort, setTopSort] = useState<TopSort>("changeDesc");
   const [holdSort, setHoldSort] = useState<HoldSort>("plPct");
+  const [viewCur, setViewCur] = useState<ViewCur>("native");
+  const [usdkrw, setUsdkrw] = useState<number | null>(null);
 
   const [indices, setIndices] = useState<Quote[]>([]);
   const [topKR, setTopKR] = useState<Quote[]>([]);
@@ -162,6 +204,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
 
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const quoteBoxRef = useRef<HTMLDivElement>(null);
 
   const refreshPortfolio = useCallback(async () => {
     try {
@@ -190,6 +233,8 @@ export default function Home() {
         setTopKR(data.topKR ?? []);
         setTopUS(data.topUS ?? []);
         setOverviewError(null);
+        const fx = (data.indices ?? []).find((i: Quote) => i.symbol === "KRW=X");
+        if (fx?.price && fx.price > 0) setUsdkrw(fx.price);
       } else {
         setOverviewError(data.error || "시장 데이터를 불러오지 못했습니다.");
       }
@@ -220,6 +265,15 @@ export default function Home() {
     const id = setInterval(refreshAll, 60_000); // 60초마다 갱신 (Yahoo 요청 제한 방지)
     return () => clearInterval(id);
   }, [refreshAll]);
+
+  // 통화 보기 설정 저장/복원
+  useEffect(() => {
+    const saved = localStorage.getItem("forinvest-viewcur");
+    if (saved === "KRW" || saved === "USD" || saved === "native") setViewCur(saved);
+  }, []);
+  useEffect(() => {
+    localStorage.setItem("forinvest-viewcur", viewCur);
+  }, [viewCur]);
 
   // 검색 (디바운스)
   useEffect(() => {
@@ -264,6 +318,10 @@ export default function Home() {
         setQuote(data.quote);
         loadNews(data.quote);
         loadChart(symbol, chartRange);
+        // 주문 패널이 화면 밖에 있으면 자연스럽게 스크롤
+        setTimeout(() => {
+          quoteBoxRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }, 80);
       } else {
         setMsg({ ok: false, text: data.error || "시세 조회 실패" });
       }
@@ -356,6 +414,27 @@ export default function Home() {
     }
   }
 
+  async function sellAll(symbol: string, quantity: number, name: string) {
+    if (busy) return;
+    if (!confirm(`${name} ${quantity}주를 전량 매도할까요?`)) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/trade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol, side: "SELL", quantity }),
+      });
+      const data = await res.json();
+      setMsg({ ok: res.ok, text: data.message || data.error || "처리됨" });
+      if (res.ok) await refreshPortfolio();
+    } catch {
+      setMsg({ ok: false, text: "주문 처리 중 오류가 발생했습니다." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function resetAccount() {
     if (!confirm("계좌를 초기화할까요? 보유 종목과 거래 내역이 모두 삭제됩니다.")) return;
     await fetch("/api/account", { method: "DELETE" });
@@ -405,6 +484,42 @@ export default function Home() {
 
   // 현재 선택 종목을 보유 중이면 차트에 평균단가선 표시
   const myHolding = quote ? holdings.find((h) => h.symbol === quote.symbol) : undefined;
+
+  // 주문 가능 금액(탄환)과 최대 매수 가능 수량
+  const buyingPower =
+    quote && account
+      ? quote.currency === "KRW"
+        ? account.cashKRW
+        : account.cashUSD
+      : 0;
+  const maxQty = quote && quote.price > 0 ? Math.floor(buyingPower / quote.price) : 0;
+
+  // ─── 통화 통합 보기 (환율 환산) ───
+  const fxOk = usdkrw != null && usdkrw > 0;
+  // 금액 표시 헬퍼: viewCur에 따라 원래 통화 그대로 또는 환산해서 표시
+  function money(n: number | null | undefined, from: "KRW" | "USD"): string {
+    if (n == null) return "-";
+    if (viewCur === "native" || !fxOk) return `${cur(from)}${fmt(n, from)}`;
+    if (viewCur === "KRW") return `₩${fmt(from === "USD" ? n * usdkrw! : n, "KRW")}`;
+    return `$${fmt(from === "KRW" ? n / usdkrw! : n, "USD")}`;
+  }
+
+  // 통합 모드일 때 계좌 전체를 하나의 통화로 합산
+  const vcur: "KRW" | "USD" = viewCur === "USD" ? "USD" : "KRW";
+  let uni: { total: number; cash: number; stock: number; pl: number; plPct: number } | null = null;
+  if (viewCur !== "native" && fxOk && krwRow && usdRow && initial) {
+    const toView = (krw: number, usd: number) =>
+      viewCur === "KRW" ? krw + usd * usdkrw! : krw / usdkrw! + usd;
+    const total = toView(krwRow.total, usdRow.total);
+    const init = toView(initial.KRW, initial.USD);
+    uni = {
+      total,
+      cash: toView(krwRow.cash, usdRow.cash),
+      stock: toView(krwRow.value, usdRow.value),
+      pl: total - init,
+      plPct: init > 0 ? ((total - init) / init) * 100 : 0,
+    };
+  }
   const favKR = favorites
     .filter((f) => f.market === "KR")
     .sort((a, b) => (b.changePercent ?? -Infinity) - (a.changePercent ?? -Infinity));
@@ -417,6 +532,7 @@ export default function Home() {
     return (
       <>
         <div className="fav-group-title">{title}</div>
+        <div className="table-wrap">
         <table>
           <tbody>
             {items.map((f, i) => (
@@ -446,6 +562,7 @@ export default function Home() {
             ))}
           </tbody>
         </table>
+        </div>
       </>
     );
   }
@@ -463,6 +580,21 @@ export default function Home() {
       </header>
 
       {/* 지수 스트립 */}
+      {lastUpdated && (() => {
+        const mh = marketHours();
+        return (
+          <div className="market-hours">
+            <span className={mh.krOpen ? "open" : "closed"}>
+              <i /> 한국장 09:00–15:30 · {mh.krOpen ? "개장 중" : "마감"}
+            </span>
+            <span className={mh.usOpen ? "open" : "closed"}>
+              <i /> 미국장 {mh.usOpenKst}–{mh.usCloseKst} (한국시간) · {mh.usOpen ? "개장 중" : "마감"}
+            </span>
+            <span className="note">주말·공휴일 휴장</span>
+          </div>
+        );
+      })()}
+
       <div className="index-strip">
         {indices.length === 0 ? (
           <div className="index-card">
@@ -487,8 +619,33 @@ export default function Home() {
       <div className="panel full" style={{ marginBottom: 16 }}>
         <div className="row-head">
           <h2><Wallet size={15} /> 모의 계좌</h2>
-          <button className="ghost" onClick={resetAccount}>계좌 초기화</button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div className="tabs">
+              <button className={viewCur === "native" ? "active" : ""} onClick={() => setViewCur("native")}>혼합</button>
+              <button className={viewCur === "KRW" ? "active" : ""} disabled={!fxOk} onClick={() => setViewCur("KRW")}>₩ 통합</button>
+              <button className={viewCur === "USD" ? "active" : ""} disabled={!fxOk} onClick={() => setViewCur("USD")}>$ 통합</button>
+            </div>
+            <button className="ghost" onClick={resetAccount}>계좌 초기화</button>
+          </div>
         </div>
+        {uni ? (
+          <div className="cash-row">
+            <div className="cash-item">
+              <div className="label">총자산 (현금 + 주식, {vcur === "KRW" ? "원화" : "달러"} 환산)</div>
+              <div className="value">{cur(vcur)}{fmt(uni.total, vcur)}</div>
+              <div className="sub-line">
+                현금 {cur(vcur)}{fmt(uni.cash, vcur)} · 주식 {cur(vcur)}{fmt(uni.stock, vcur)}
+              </div>
+            </div>
+            <div className="cash-item">
+              <div className="label">전체 손익 (초기 자금 대비)</div>
+              <div className={`value ${uni.pl > 0 ? "up" : uni.pl < 0 ? "down" : ""}`}>
+                {uni.pl > 0 ? "+" : ""}{cur(vcur)}{fmt(uni.pl, vcur)} ({uni.plPct.toFixed(2)}%)
+              </div>
+              <div className="sub-line">적용 환율 1$ ≈ ₩{fmt(usdkrw, "KRW")}</div>
+            </div>
+          </div>
+        ) : (
         <div className="cash-row">
           <div className="cash-item">
             <div className="label">원화 총자산 (현금 + 주식)</div>
@@ -527,6 +684,7 @@ export default function Home() {
             <div className="sub-line">초기 자금 ${initial ? fmt(initial.USD, "USD") : "-"} 대비</div>
           </div>
         </div>
+        )}
       </div>
 
       <div className="grid">
@@ -554,6 +712,7 @@ export default function Home() {
           {topList.length === 0 ? (
             <div className="empty">{overviewError ? "시장 데이터를 불러오지 못했습니다." : "불러오는 중…"}</div>
           ) : (
+            <div className="table-wrap">
             <table>
               <tbody>
                 {topList.map((q, i) => (
@@ -578,6 +737,7 @@ export default function Home() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
 
@@ -589,6 +749,11 @@ export default function Home() {
               placeholder="종목명 또는 심볼 (예: 삼성전자, AAPL, 005930.KS)"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && results.length > 0) {
+                  selectSymbol(results[0].symbol);
+                }
+              }}
             />
           </div>
           {searching && <div className="muted">검색 중…</div>}
@@ -606,7 +771,7 @@ export default function Home() {
           </div>
 
           {quote && (
-            <div className="quote-box">
+            <div className="quote-box" ref={quoteBoxRef}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span className="name">
                   {quote.name}
@@ -629,6 +794,22 @@ export default function Home() {
                   <span className="muted"> · 장 마감 시세</span>
                 )}
               </div>
+              <div className="buying-power">
+                <span>
+                  주문가능 <b>{cur(quote.currency)}{fmt(buyingPower, quote.currency)}</b>
+                </span>
+                <span>
+                  최대 <b>{maxQty.toLocaleString()}주</b>
+                </span>
+                {maxQty > 0 && (
+                  <button className="max-btn" onClick={() => setQty(maxQty)}>최대로</button>
+                )}
+                {myHolding && (
+                  <span>
+                    보유 <b>{myHolding.quantity}주</b>
+                  </span>
+                )}
+              </div>
               <div className="trade-form">
                 <input
                   type="number"
@@ -639,6 +820,15 @@ export default function Home() {
                 <span className="muted">주 ≈ {cur(quote.currency)}{fmt(estimated, quote.currency)}</span>
                 <button className="buy" disabled={busy} onClick={() => trade("BUY")}>매수</button>
                 <button className="sell" disabled={busy} onClick={() => trade("SELL")}>매도</button>
+                {myHolding && (
+                  <button
+                    className="sell-all"
+                    disabled={busy}
+                    onClick={() => sellAll(quote.symbol, myHolding.quantity, quote.name)}
+                  >
+                    전량 매도 ({myHolding.quantity}주)
+                  </button>
+                )}
               </div>
 
               <div className="chart-box">
@@ -697,13 +887,33 @@ export default function Home() {
                       <div className="chart-legend">
                         {showMA && (
                           <>
-                            <span><i style={{ background: "#ffb02e" }} />MA5</span>
-                            <span><i style={{ background: "#2ecc71" }} />MA20</span>
-                            <span><i style={{ background: "#b07cff" }} />MA60</span>
+                            <span
+                              className="has-tip"
+                              title="최근 5개 봉의 종가 평균선. 단기 추세를 보여줍니다 (일봉 기준 약 1주). 주가가 이 선을 위로 뚫으면 단기 반등 신호로 보기도 해요."
+                            >
+                              <i style={{ background: "#ffb02e" }} />MA5
+                            </span>
+                            <span
+                              className="has-tip"
+                              title="최근 20개 봉의 종가 평균선. 중기 추세를 보여줍니다 (일봉 기준 약 1개월). '생명선'이라고도 불리며, 주가가 이 위에 있으면 상승 흐름으로 보는 경우가 많아요."
+                            >
+                              <i style={{ background: "#2ecc71" }} />MA20
+                            </span>
+                            <span
+                              className="has-tip"
+                              title="최근 60개 봉의 종가 평균선. 장기 추세를 보여줍니다 (일봉 기준 약 3개월). '수급선'이라고도 하며, 장기 방향을 판단할 때 참고합니다."
+                            >
+                              <i style={{ background: "#b07cff" }} />MA60
+                            </span>
                           </>
                         )}
                         {myHolding && (
-                          <span><i style={{ background: "#ffd34d" }} />내 평균단가</span>
+                          <span
+                            className="has-tip"
+                            title="내가 이 종목을 매수한 평균 가격입니다. 현재가가 이 점선보다 위에 있으면 수익, 아래면 손실 상태예요."
+                          >
+                            <i style={{ background: "#ffd34d" }} />내 평균단가
+                          </span>
                         )}
                       </div>
                     )}
@@ -786,7 +996,9 @@ export default function Home() {
                     <th>수량</th>
                     <th>평균단가</th>
                     <th>현재가</th>
+                    <th>평가금액</th>
                     <th>손익</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -800,12 +1012,25 @@ export default function Home() {
                           <div className="small">{h.symbol}</div>
                         </td>
                         <td>{h.quantity}</td>
-                        <td>{cur(h.currency)}{fmt(h.avgCost, h.currency)}</td>
-                        <td>{h.currentPrice != null ? `${cur(h.currency)}${fmt(h.currentPrice, h.currency)}` : "-"}</td>
+                        <td>{money(h.avgCost, h.currency)}</td>
+                        <td>{money(h.currentPrice, h.currency)}</td>
+                        <td>{money(h.marketValue, h.currency)}</td>
                         <td className={cls}>
                           {h.profitLoss != null
-                            ? `${h.profitLoss > 0 ? "+" : ""}${fmt(h.profitLoss, h.currency)} (${h.profitLossPercent!.toFixed(2)}%)`
+                            ? `${h.profitLoss > 0 ? "+" : ""}${money(h.profitLoss, h.currency)} (${h.profitLossPercent!.toFixed(2)}%)`
                             : "-"}
+                        </td>
+                        <td>
+                          <button
+                            className="sell-all"
+                            disabled={busy}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              sellAll(h.symbol, h.quantity, h.name);
+                            }}
+                          >
+                            전량 매도
+                          </button>
                         </td>
                       </tr>
                     );
@@ -826,7 +1051,7 @@ export default function Home() {
               <table>
                 <thead>
                   <tr>
-                    <th>일시 (UTC)</th>
+                    <th>일시</th>
                     <th>종목</th>
                     <th>구분</th>
                     <th>수량</th>
@@ -837,7 +1062,7 @@ export default function Home() {
                 <tbody>
                   {txs.map((t) => (
                     <tr key={t.id}>
-                      <td className="muted">{t.createdAt}</td>
+                      <td className="muted">{fmtDateKST(t.createdAt)}</td>
                       <td>
                         {t.name}
                         <div className="small">{t.symbol}</div>
@@ -846,8 +1071,8 @@ export default function Home() {
                         {t.side === "BUY" ? "매수" : "매도"}
                       </td>
                       <td>{t.quantity}</td>
-                      <td>{cur(t.currency)}{fmt(t.price, t.currency)}</td>
-                      <td>{cur(t.currency)}{fmt(t.total, t.currency)}</td>
+                      <td>{money(t.price, t.currency)}</td>
+                      <td>{money(t.total, t.currency)}</td>
                     </tr>
                   ))}
                 </tbody>

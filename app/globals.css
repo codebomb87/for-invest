@@ -34,6 +34,7 @@ header.topbar {
   align-items: baseline;
   gap: 12px;
   margin-bottom: 20px;
+  flex-wrap: wrap;
 }
 header.topbar h1 { font-size: 22px; }
 header.topbar .sub { color: var(--muted); font-size: 13px; }
@@ -43,6 +44,9 @@ header.topbar .sub { color: var(--muted); font-size: 13px; }
   grid-template-columns: 1fr 1fr;
   gap: 16px;
 }
+/* 그리드 자식이 내부 표 너비 때문에 부풀어 삐져나오는 것 방지 */
+.grid > .panel { min-width: 0; }
+.table-wrap { overflow-x: auto; max-width: 100%; }
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr; }
 }
@@ -129,7 +133,7 @@ td .small { font-size: 11px; color: var(--muted); }
 .msg.err { background: rgba(240, 68, 82, 0.12); color: var(--up); }
 
 .empty { color: var(--muted); padding: 16px 0; text-align: center; }
-.row-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.row-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
 .row-head h2 { margin-bottom: 0; }
 
 /* ─── 지수 스트립 ─── */
@@ -226,3 +230,47 @@ button.star-btn { display: inline-flex; align-items: center; vertical-align: mid
 .chart-legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
 .chart-legend i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
 .chart-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+/* ─── 장 운영 시간 ─── */
+.market-hours { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; font-size: 12px; }
+.market-hours span {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border-radius: 99px;
+  border: 1px solid var(--border); color: var(--muted);
+}
+.market-hours span i { width: 7px; height: 7px; border-radius: 99px; background: var(--muted); }
+.market-hours span.open { color: var(--green); border-color: rgba(46, 204, 113, 0.4); }
+.market-hours span.open i { background: var(--green); }
+.market-hours span.closed { color: var(--muted); }
+.market-hours span.note { border: none; padding: 0; font-size: 11px; }
+
+/* 범례 호버 설명 */
+.chart-legend .has-tip { cursor: help; border-bottom: 1px dotted var(--muted); padding-bottom: 1px; }
+.chart-legend .has-tip:hover { color: var(--text); }
+
+/* 전량 매도 버튼 */
+button.sell-all {
+  background: transparent;
+  border: 1px solid var(--down);
+  color: var(--down);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 8px;
+}
+button.sell-all:hover:not(:disabled) { background: var(--down); color: #fff; }
+
+/* 주문 가능 금액 (탄환) */
+.buying-power {
+  display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+  margin-top: 12px; padding: 8px 12px;
+  background: rgba(79, 140, 255, 0.08);
+  border: 1px solid rgba(79, 140, 255, 0.25);
+  border-radius: 8px;
+  font-size: 12px; color: var(--muted);
+}
+.buying-power b { color: var(--text); font-weight: 700; }
+button.max-btn {
+  background: transparent; border: 1px solid var(--accent); color: var(--accent);
+  font-size: 11px; padding: 2px 9px; border-radius: 99px;
+}
+button.max-btn:hover { background: var(--accent); color: #fff; }
