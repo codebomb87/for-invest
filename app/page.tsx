@@ -11,6 +11,17 @@ import {
   History,
   Newspaper,
 } from "lucide-react";
+import CandleChart, { type Candle, type ChartType } from "./components/CandleChart";
+
+const CHART_RANGES = [
+  ["1d", "1일"],
+  ["5d", "1주"],
+  ["1mo", "1개월"],
+  ["6mo", "6개월"],
+  ["1y", "1년"],
+  ["5y", "5년"],
+] as const;
+type ChartRange = (typeof CHART_RANGES)[number][0];
 
 type Quote = {
   symbol: string;
@@ -141,6 +152,11 @@ export default function Home() {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [newsLoading, setNewsLoading] = useState(false);
+  const [candles, setCandles] = useState<Candle[]>([]);
+  const [chartRange, setChartRange] = useState<ChartRange>("1mo");
+  const [chartLoading, setChartLoading] = useState(false);
+  const [chartType, setChartType] = useState<ChartType>("candle");
+  const [showMA, setShowMA] = useState(true);
   const [qty, setQty] = useState(1);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -240,18 +256,40 @@ export default function Home() {
     setMsg(null);
     setQuote(null);
     setNews([]);
+    setCandles([]);
     try {
       const res = await fetch(`/api/quote?symbol=${encodeURIComponent(symbol)}`);
       const data = await res.json();
       if (res.ok && data.quote) {
         setQuote(data.quote);
         loadNews(data.quote);
+        loadChart(symbol, chartRange);
       } else {
         setMsg({ ok: false, text: data.error || "시세 조회 실패" });
       }
     } catch {
       setMsg({ ok: false, text: "시세 조회에 실패했습니다. 네트워크를 확인하세요." });
     }
+  }
+
+  async function loadChart(symbol: string, range: ChartRange) {
+    setChartLoading(true);
+    try {
+      const res = await fetch(
+        `/api/chart?symbol=${encodeURIComponent(symbol)}&range=${range}`
+      );
+      const data = await res.json();
+      setCandles(data.candles ?? []);
+    } catch {
+      setCandles([]);
+    } finally {
+      setChartLoading(false);
+    }
+  }
+
+  function changeRange(range: ChartRange) {
+    setChartRange(range);
+    if (quote) loadChart(quote.symbol, range);
   }
 
   async function loadNews(q: Quote) {
@@ -364,6 +402,9 @@ export default function Home() {
   }
   const krwRow = totalRow("KRW");
   const usdRow = totalRow("USD");
+
+  // 현재 선택 종목을 보유 중이면 차트에 평균단가선 표시
+  const myHolding = quote ? holdings.find((h) => h.symbol === quote.symbol) : undefined;
   const favKR = favorites
     .filter((f) => f.market === "KR")
     .sort((a, b) => (b.changePercent ?? -Infinity) - (a.changePercent ?? -Infinity));
@@ -598,6 +639,82 @@ export default function Home() {
                 <span className="muted">주 ≈ {cur(quote.currency)}{fmt(estimated, quote.currency)}</span>
                 <button className="buy" disabled={busy} onClick={() => trade("BUY")}>매수</button>
                 <button className="sell" disabled={busy} onClick={() => trade("SELL")}>매도</button>
+              </div>
+
+              <div className="chart-box">
+                <div className="chart-controls">
+                  <div className="range-tabs">
+                    {CHART_RANGES.map(([value, label]) => (
+                      <button
+                        key={value}
+                        className={chartRange === value ? "active" : ""}
+                        onClick={() => changeRange(value)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="range-tabs">
+                    <button
+                      className={chartType === "candle" ? "active" : ""}
+                      onClick={() => setChartType("candle")}
+                    >
+                      캔들
+                    </button>
+                    <button
+                      className={chartType === "line" ? "active" : ""}
+                      onClick={() => setChartType("line")}
+                    >
+                      라인
+                    </button>
+                    <button
+                      className={showMA ? "active" : ""}
+                      onClick={() => setShowMA((v) => !v)}
+                      title="이동평균선 표시/숨김"
+                    >
+                      이동평균
+                    </button>
+                  </div>
+                </div>
+                {chartLoading ? (
+                  <div className="muted" style={{ padding: "60px 0", textAlign: "center" }}>
+                    차트 불러오는 중…
+                  </div>
+                ) : candles.length === 0 ? (
+                  <div className="muted" style={{ padding: "60px 0", textAlign: "center" }}>
+                    차트 데이터를 가져오지 못했습니다.
+                  </div>
+                ) : (
+                  <>
+                    <CandleChart
+                      key={`${quote.symbol}-${chartType}-${showMA}-${myHolding?.avgCost ?? 0}`}
+                      candles={candles}
+                      type={chartType}
+                      showMA={showMA}
+                      avgCost={myHolding?.avgCost ?? null}
+                    />
+                    {(showMA || myHolding) && (
+                      <div className="chart-legend">
+                        {showMA && (
+                          <>
+                            <span><i style={{ background: "#ffb02e" }} />MA5</span>
+                            <span><i style={{ background: "#2ecc71" }} />MA20</span>
+                            <span><i style={{ background: "#b07cff" }} />MA60</span>
+                          </>
+                        )}
+                        {myHolding && (
+                          <span><i style={{ background: "#ffd34d" }} />내 평균단가</span>
+                        )}
+                      </div>
+                    )}
+                    {showMA && (
+                      <div className="chart-hint">
+                        이동평균선(MA)은 최근 N개 봉의 평균 가격입니다. 주가가 선 위에 있으면
+                        상승 추세, 아래면 하락 추세로 참고하는 경우가 많아요.
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               <div className="news-box">

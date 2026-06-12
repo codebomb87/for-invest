@@ -208,3 +208,21 @@ header.topbar h1 svg { color: var(--accent); }
 .news-head { display: flex; align-items: center; gap: 6px; }
 .news-head svg { color: var(--muted); }
 button.star-btn { display: inline-flex; align-items: center; vertical-align: middle; }
+
+/* ─── 캔들차트 ─── */
+.chart-box { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+.range-tabs { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+.range-tabs button {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-size: 12px;
+}
+.range-tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chart-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.chart-controls .range-tabs { margin-bottom: 0; }
+.chart-legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
+.chart-legend i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.chart-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }

@@ -167,3 +167,70 @@ export class YahooMarketDataProvider implements MarketDataProvider {
 }
 
 export const marketData: MarketDataProvider = new YahooMarketDataProvider();
+
+// ─── 차트 (캔들) 데이터 ──────────────────────────────────────────
+export type ChartRange = "1d" | "5d" | "1mo" | "6mo" | "1y" | "5y";
+
+export interface Candle {
+  time: number; // unix seconds
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number | null;
+}
+
+const RANGE_INTERVAL: Record<ChartRange, string> = {
+  "1d": "5m",
+  "5d": "30m",
+  "1mo": "1d",
+  "6mo": "1d",
+  "1y": "1wk",
+  "5y": "1mo",
+};
+
+const CHART_CACHE_MS = 120_000;
+const chartCache = new Map<string, { candles: Candle[]; at: number }>();
+
+export async function getChart(symbol: string, range: ChartRange): Promise<Candle[]> {
+  const key = `${symbol}:${range}`;
+  const cached = chartCache.get(key);
+  if (cached && Date.now() - cached.at < CHART_CACHE_MS) return cached.candles;
+  if (Date.now() < blockedUntil) return cached?.candles ?? [];
+
+  const interval = RANGE_INTERVAL[range] ?? "1d";
+  let data: any;
+  try {
+    data = await yfetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+        symbol
+      )}?range=${range}&interval=${interval}`
+    );
+  } catch (e: any) {
+    console.error(`[market/chart] ${symbol} ${range} 실패:`, e?.message || e);
+    return cached?.candles ?? [];
+  }
+
+  const r = data?.chart?.result?.[0];
+  const ts: number[] = r?.timestamp ?? [];
+  const q = r?.indicators?.quote?.[0] ?? {};
+  const candles: Candle[] = [];
+  for (let i = 0; i < ts.length; i++) {
+    const open = q.open?.[i];
+    const high = q.high?.[i];
+    const low = q.low?.[i];
+    const close = q.close?.[i];
+    if (open == null || high == null || low == null || close == null) continue;
+    candles.push({
+      time: ts[i],
+      open,
+      high,
+      low,
+      close,
+      volume: q.volume?.[i] ?? null,
+    });
+  }
+
+  chartCache.set(key, { candles, at: Date.now() });
+  return candles;
+}
