@@ -108,7 +108,7 @@ export default function AdminPage() {
               <tr style={{ background: "#f8fafc", textAlign: "left" }}>
                 <th style={th}>#</th>
                 <th style={th}>IP 주소</th>
-                <th style={th}>접속 시간 (UTC)</th>
+                <th style={th}>접속 시간 (KST)</th>
                 <th style={th}>User-Agent</th>
               </tr>
             </thead>

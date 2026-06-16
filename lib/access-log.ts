@@ -76,7 +76,8 @@ export function recentLogs(limit = 100): AccessLogRow[] {
   const db = getDb();
   return db
     .prepare(
-      `SELECT id, ip, path, method, user_agent, referer, created_at
+      `SELECT id, ip, path, method, user_agent, referer,
+              datetime(created_at, '+9 hours') AS created_at
        FROM access_logs ORDER BY id DESC LIMIT ?`
     )
     .all(Math.max(1, Math.min(limit, 10_000))) as unknown as AccessLogRow[];
