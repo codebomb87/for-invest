@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IP 접속 로그 관리자</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', -apple-system, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    min-height: 100vh;
+  }
+  header {
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+    padding: 18px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  header h1 { font-size: 1.25rem; font-weight: 600; color: #f8fafc; }
+  header h1 span { color: #38bdf8; }
+  .badge {
+    font-size: 0.72rem;
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-weight: 600;
+  }
+  .badge.live { background: #14532d; color: #4ade80; }
+
+  main { padding: 28px 32px; max-width: 1400px; margin: 0 auto; }
+
+  /* 통계 카드 */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
+  .stat-card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 20px 22px;
+  }
+  .stat-card .label { font-size: 0.78rem; color: #94a3b8; margin-bottom: 8px; }
+  .stat-card .value { font-size: 1.8rem; font-weight: 700; color: #f8fafc; }
+  .stat-card .sub { font-size: 0.75rem; color: #64748b; margin-top: 4px; }
+
+  /* 툴바 */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .toolbar h2 { font-size: 1rem; font-weight: 600; color: #cbd5e1; }
+  .btn-group { display: flex; gap: 10px; }
+
+  button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .btn-primary { background: #0ea5e9; color: #fff; }
+  .btn-primary:hover { background: #0284c7; }
+  .btn-secondary { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+  .btn-secondary:hover { background: #334155; color: #e2e8f0; }
+  .btn-danger { background: #7f1d1d; color: #fca5a5; border: 1px solid #991b1b; }
+  .btn-danger:hover { background: #991b1b; }
+
+  /* 검색 */
+  .search-bar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .search-bar input {
+    flex: 1;
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    padding: 9px 14px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    outline: none;
+  }
+  .search-bar input:focus { border-color: #38bdf8; }
+  .search-bar select {
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    padding: 9px 14px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    outline: none;
+  }
+
+  /* 테이블 */
+  .table-wrap {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+  thead th {
+    background: #0f172a;
+    padding: 12px 16px;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    border-bottom: 1px solid #334155;
+    white-space: nowrap;
+  }
+  tbody tr { border-bottom: 1px solid #1e293b; transition: background .1s; }
+  tbody tr:hover { background: #0f172a; }
+  tbody td { padding: 11px 16px; color: #cbd5e1; }
+  td.ip { font-family: monospace; color: #38bdf8; font-size: 0.9rem; }
+  td.time { color: #94a3b8; white-space: nowrap; }
+  td.method span {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .method-GET span { background: #14532d; color: #4ade80; }
+  .method-POST span { background: #1e3a5f; color: #60a5fa; }
+  td.status span {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .status-2xx span { background: #14532d; color: #4ade80; }
+  .status-3xx span { background: #1e3a5f; color: #60a5fa; }
+  .status-4xx span { background: #431407; color: #fdba74; }
+  .status-5xx span { background: #450a0a; color: #f87171; }
+  td.ua { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          color: #64748b; font-size: 0.78rem; }
+  tbody tr:last-child { border-bottom: none; }
+
+  .empty { text-align: center; padding: 48px; color: #475569; }
+  .empty .icon { font-size: 2.5rem; margin-bottom: 10px; }
+
+  /* 로그 파일 목록 */
+  .files-section { margin-top: 28px; }
+  .file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-bottom: 1px solid #334155;
+    font-size: 0.84rem;
+  }
+  .file-item:last-child { border-bottom: none; }
+  .file-name { font-family: monospace; color: #38bdf8; }
+  .file-meta { color: #64748b; font-size: 0.78rem; }
+
+  /* 토스트 */
+  #toast {
+    position: fixed; bottom: 28px; right: 28px;
+    background: #1e293b; border: 1px solid #334155;
+    color: #e2e8f0; padding: 12px 20px;
+    border-radius: 10px; font-size: 0.85rem;
+    opacity: 0; transform: translateY(10px);
+    transition: all .25s; pointer-events: none; z-index: 999;
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🛡 IP 접속 <span>로그 관리자</span></h1>
+  <span class="badge live">● LIVE</span>
+</header>
+
+<main>
+
+  <!-- 통계 카드 -->
+  <div class="stats">
+    <div class="stat-card">
+      <div class="label">총 기록 (현재 파일)</div>
+      <div class="value" id="stat-total">—</div>
+      <div class="sub">access.log</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">고유 IP 수</div>
+      <div class="value" id="stat-unique">—</div>
+      <div class="sub">최근 100건 기준</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">마지막 접속</div>
+      <div class="value" id="stat-last" style="font-size:1.1rem;margin-top:4px">—</div>
+      <div class="sub" id="stat-last-ip">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">로그 파일 수</div>
+      <div class="value" id="stat-files">—</div>
+      <div class="sub">로테이션 포함</div>
+    </div>
+  </div>
+
+  <!-- 로그 테이블 -->
+  <div class="toolbar">
+    <h2>최근 접속 로그</h2>
+    <div class="btn-group">
+      <button class="btn-secondary" onclick="loadLogs()">↻ 새로고침</button>
+      <button class="btn-primary" onclick="downloadCSV()">⬇ CSV 다운로드 (최근 100건)</button>
+    </div>
+  </div>
+
+  <div class="search-bar">
+    <input type="text" id="search-ip" placeholder="IP 주소로 필터..." oninput="filterTable()">
+    <select id="filter-status" onchange="filterTable()">
+      <option value="">모든 상태코드</option>
+      <option value="2">2xx 성공</option>
+      <option value="3">3xx 리다이렉트</option>
+      <option value="4">4xx 클라이언트 오류</option>
+      <option value="5">5xx 서버 오류</option>
+    </select>
+    <select id="filter-limit" onchange="loadLogs()">
+      <option value="50">최근 50건</option>
+      <option value="100" selected>최근 100건</option>
+      <option value="200">최근 200건</option>
+    </select>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>접속 시간</th>
+          <th>IP 주소</th>
+          <th>메서드</th>
+          <th>경로</th>
+          <th>상태</th>
+          <th>User-Agent</th>
+        </tr>
+      </thead>
+      <tbody id="log-body">
+        <tr><td colspan="7" class="empty"><div class="icon">📋</div>로그를 불러오는 중...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 로그 파일 목록 -->
+  <div class="files-section">
+    <div class="toolbar" style="margin-bottom:12px">
+      <h2>로그 파일 목록 (로테이션 현황)</h2>
+    </div>
+    <div class="table-wrap">
+      <div id="file-list"></div>
+    </div>
+  </div>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+let allLogs = [];
+
+async function loadLogs() {
+  const limit = document.getElementById('filter-limit').value;
+  try {
+    const res = await fetch(`/admin/logs?limit=${limit}`);
+    const data = await res.json();
+    allLogs = data.logs || [];
+    updateStats(allLogs);
+    renderTable(allLogs);
+  } catch(e) {
+    showToast('❌ 로그 불러오기 실패');
+  }
+  loadFileList();
+}
+
+function updateStats(logs) {
+  document.getElementById('stat-total').textContent = logs.length;
+  const ips = new Set(logs.map(r => r.ip));
+  document.getElementById('stat-unique').textContent = ips.size;
+  if (logs.length > 0) {
+    const last = logs[0];
+    document.getElementById('stat-last').textContent = last.timestamp || '—';
+    document.getElementById('stat-last-ip').textContent = last.ip || '—';
+  }
+}
+
+function renderTable(rows) {
+  const tbody = document.getElementById('log-body');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty"><div class="icon">📭</div>기록된 로그가 없습니다</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map((r, i) => {
+    const statusClass = r.status ? `status-${r.status[0]}xx` : '';
+    const methodClass = `method-${r.method || 'GET'}`;
+    return `<tr>
+      <td style="color:#475569;font-size:.8rem">${i+1}</td>
+      <td class="time">${r.timestamp || ''}</td>
+      <td class="ip">${r.ip || ''}</td>
+      <td class="${methodClass}"><span>${r.method || ''}</span></td>
+      <td style="color:#94a3b8;font-family:monospace;font-size:.82rem">${escHtml(r.path || '')}</td>
+      <td class="${statusClass}"><span>${r.status || ''}</span></td>
+      <td class="ua" title="${escHtml(r.user_agent || '')}">${escHtml(r.user_agent || '')}</td>
+    </tr>`;
+  }).join('');
+}
+
+function filterTable() {
+  const ip = document.getElementById('search-ip').value.toLowerCase();
+  const status = document.getElementById('filter-status').value;
+  const filtered = allLogs.filter(r => {
+    const ipMatch = !ip || (r.ip || '').toLowerCase().includes(ip);
+    const statusMatch = !status || (r.status || '').startsWith(status);
+    return ipMatch && statusMatch;
+  });
+  renderTable(filtered);
+}
+
+async function loadFileList() {
+  try {
+    const res = await fetch('/admin/log-files');
+    const files = await res.json();
+    document.getElementById('stat-files').textContent = files.length;
+    document.getElementById('file-list').innerHTML = files.map(f =>
+      `<div class="file-item">
+        <span class="file-name">📄 ${f.name}</span>
+        <span class="file-meta">${f.size_kb} KB &nbsp;·&nbsp; ${f.modified}</span>
+      </div>`
+    ).join('') || '<div class="empty" style="padding:20px">파일 없음</div>';
+  } catch(e) {}
+}
+
+function downloadCSV() {
+  window.location.href = '/admin/logs/download';
+  showToast('✅ CSV 다운로드 시작');
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// 초기 로드 + 30초마다 자동 갱신
+loadLogs();
+setInterval(loadLogs, 30000);
+</script>
+</body>
+</html>

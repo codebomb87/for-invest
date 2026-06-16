@@ -31,6 +31,75 @@ npm run dev
 ## 데이터 저장
 
 `data/forinvest.db` (SQLite). 삭제하면 초기 상태로 리셋됩니다.
+접속 로그도 같은 DB의 `access_logs` 테이블에 저장됩니다.
+
+## 접속 로그 / 관리자 페이지
+
+접속한 사용자의 IP 주소·시간·User-Agent가 자동으로 기록됩니다(`app/layout.tsx`가 매 접속마다 기록).
+관리자 페이지에서 최근 100건을 조회하고 CSV로 내려받을 수 있습니다.
+
+### 관리자 토큰 설정
+
+조회/다운로드는 토큰으로 보호됩니다. 환경변수 `ADMIN_TOKEN` 으로 지정하세요.
+
+```bash
+# 로컬: .env.local 또는 실행 전 환경변수
+ADMIN_TOKEN=원하는비밀토큰 npm run dev
+```
+
+> `ADMIN_TOKEN` 미설정 시 기본값 `forinvest-admin` 이 쓰입니다. 배포 후 반드시 변경하세요.
+
+### 사용 방법 (로컬)
+
+1. `npm run dev` 후 http://localhost:3000 에 몇 번 접속 (로그 쌓기)
+2. 관리자 페이지 접속: **http://localhost:3000/admin**
+3. 토큰 입력 → **조회** → 최근 100건 표시 → **로그 다운로드(CSV)** 로 저장
+
+직접 API를 호출할 수도 있습니다:
+
+```bash
+# 최근 100건 JSON
+curl "http://localhost:3000/api/admin/logs?token=<ADMIN_TOKEN>&limit=100"
+
+# CSV 다운로드
+curl -OJ "http://localhost:3000/api/admin/logs?token=<ADMIN_TOKEN>&format=csv"
+
+# 보관 정책 즉시 적용(오래된 로그 정리)
+curl -X DELETE "http://localhost:3000/api/admin/logs?token=<ADMIN_TOKEN>"
+```
+
+토큰은 쿼리스트링(`?token=`) 대신 헤더로도 보낼 수 있습니다: `-H "x-admin-token: <ADMIN_TOKEN>"`.
+
+### Render 배포 후 (GitHub → Render)
+
+`git push` → Render 자동 빌드 후 발급되는 주소(예: `https://forinvest-xxxx.onrender.com`)에서 동일하게 동작합니다.
+
+1. Render 대시보드 → 서비스 → **Environment** 에 `ADMIN_TOKEN` 추가 후 재배포
+2. 관리자 페이지: **`https://forinvest-xxxx.onrender.com/admin`**
+3. 로그 API 엔드포인트:
+   - 조회: `https://forinvest-xxxx.onrender.com/api/admin/logs?token=<ADMIN_TOKEN>&limit=100`
+   - CSV 다운로드: `https://forinvest-xxxx.onrender.com/api/admin/logs?token=<ADMIN_TOKEN>&format=csv`
+   - 로그 정리: `DELETE https://forinvest-xxxx.onrender.com/api/admin/logs?token=<ADMIN_TOKEN>`
+
+Render는 프록시 뒤에 있으므로 실제 방문자 IP는 `x-forwarded-for` 헤더에서 읽습니다(이미 처리됨).
+
+> ⚠️ Render **무료 플랜**은 15분 미접속 시 잠들면서 SQLite가 초기화되어 로그도 사라집니다.
+> 로그를 계속 보관하려면 Starter + 디스크(`DATA_DIR`) 설정이 필요합니다(`DEPLOY-RENDER-RAILWAY.md` 참고).
+
+### 로그가 너무 쌓일 때 (보관 정책)
+
+자동 정리가 내장되어 있습니다(`lib/access-log.ts`). 200건 기록마다 정리가 실행됩니다.
+
+- **행 수 제한(기본)**: 최신 `ACCESS_LOG_MAX`건(기본 50,000)만 유지하고 오래된 로그부터 삭제 — 링버퍼 방식.
+- **기간 제한(선택)**: `ACCESS_LOG_RETENTION_DAYS`(기본 0=무제한)를 N으로 두면 N일 지난 로그 삭제.
+- **수동 정리**: 위 `DELETE /api/admin/logs` 호출 또는 관리자 페이지의 "오래된 로그 정리" 버튼.
+
+```bash
+# 예: 최대 2만건 + 90일 보관
+ACCESS_LOG_MAX=20000 ACCESS_LOG_RETENTION_DAYS=90 npm start
+```
+
+더 키우려면(권장 진화 방향): ① 주기적으로 CSV 다운로드해 외부 보관 → ② 로그 테이블을 별도 DB(Postgres)로 분리 → ③ 외부 로깅 서비스(예: Logtail/CloudWatch)로 전송.
 
 ## 구조 (추후 확장 고려)
 

@@ -2,28 +2,20 @@ import { DatabaseSync } from "node:sqlite";
 import path from "path";
 import fs from "fs";
 
-// Node 22.13+ 내장 SQLite (node:sqlite) 사용 — 네이티브 모듈 설치 불필요.
-// 추후 실서비스 전환 시 Postgres 등으로 교체 가능하도록
-// DB 접근은 이 모듈과 broker/simulated.ts 안에만 둔다.
-
-// 배포 환경(서버리스 등)에서 쓰기 가능한 경로로 바꿀 수 있게 환경변수 지원
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "forinvest.db");
 
-const INITIAL_CASH_KRW = 10_000_000; // 초기 모의 자금: 1천만 원
-const INITIAL_CASH_USD = 10_000;     // 초기 모의 자금: $10,000
+const INITIAL_CASH_KRW = 10_000_000;
+const INITIAL_CASH_USD = 10_000;
 
-// 전체 손익 계산 기준 (초기 자금)
 export const INITIAL_CASH = {
   KRW: INITIAL_CASH_KRW,
   USD: INITIAL_CASH_USD,
 } as const;
 
-// 스키마 변경 시 이 값을 올리면 핫리로드/재시작 시 init이 다시 실행됨
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 declare global {
-  // Next.js dev 모드의 핫 리로드 시 커넥션 중복 생성 방지
   var __forinvestDb: DatabaseSync | undefined;
   var __forinvestSchemaV: number | undefined;
 }
@@ -69,9 +61,20 @@ function init(db: DatabaseSync) {
       market TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- 접속자 IP 로그 (관리자 페이지에서 조회/다운로드)
+    CREATE TABLE IF NOT EXISTS access_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ip TEXT NOT NULL,
+      path TEXT,
+      method TEXT,
+      user_agent TEXT,
+      referer TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_access_logs_created ON access_logs(created_at);
   `);
 
-  // 기본 모의 계좌가 없으면 생성
   const row = db.prepare("SELECT COUNT(*) AS c FROM accounts").get() as { c: number };
   if (row.c === 0) {
     db.prepare(
@@ -85,7 +88,6 @@ export function getDb(): DatabaseSync {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     global.__forinvestDb = new DatabaseSync(DB_PATH);
   }
-  // 핫리로드로 코드가 갱신돼도 (기존 연결 재사용 시) 스키마 마이그레이션 보장
   if (global.__forinvestSchemaV !== SCHEMA_VERSION) {
     init(global.__forinvestDb);
     global.__forinvestSchemaV = SCHEMA_VERSION;
@@ -93,7 +95,6 @@ export function getDb(): DatabaseSync {
   return global.__forinvestDb;
 }
 
-// 간단한 트랜잭션 헬퍼 (node:sqlite에는 transaction()이 없음)
 export function withTransaction<T>(db: DatabaseSync, fn: () => T): T {
   db.exec("BEGIN");
   try {
